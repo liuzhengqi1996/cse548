@@ -1,0 +1,94 @@
+#!/bin/sh
+
+
+Internet_IP="10.0.1.8"
+Internet_IP_RANGE="10.0.1.0/24"
+Internet_BCAST_ADRESS="10.0.1.255"
+Internet_IFACE="enp0s8"
+
+####
+# 1.2 Client network configuration.
+#
+#
+
+#
+# IP addresses of the client-side network
+#
+Client_NET_IP="10.0.2.10"
+Client_NET_IP_RANGE="10.0.2.0/24"
+Client_NET_BCAST_ADRESS="10.0.2.255"
+Client_NET_IFACE="enp0s3"
+
+
+#
+# IP aliases for the server (server's IP address)
+#
+LO_IFACE="lo"
+LO_IP="127.0.0.1"
+WEB_IP_ADDRESS="127.0.0.1"
+#IP aliases for NATed services (this is the GW's ip on client network)
+NAT_WEB_IP_ADDRESS="10.0.2.11"
+
+####
+# 1.4 IPTables Configuration.
+#
+
+IPTABLES="/sbin/iptables"
+
+/sbin/depmod -a	 
+
+#
+# flush iptables
+#
+$IPTABLES -F 
+$IPTABLES -X 
+$IPTABLES -F -t nat
+
+#####
+# 2.1 Required modules
+#
+
+/sbin/modprobe ip_tables
+/sbin/modprobe ip_conntrack
+/sbin/modprobe iptable_filter
+/sbin/modprobe iptable_mangle
+/sbin/modprobe iptable_nat
+/sbin/modprobe ipt_LOG
+/sbin/modprobe ipt_limit
+/sbin/modprobe ipt_state
+
+#####
+
+echo "1" > /proc/sys/net/ipv4/ip_forward
+
+# Whitelist 
+$IPTABLES -P INPUT DROP
+$IPTABLES -P OUTPUT DROP
+$IPTABLES -P FORWARD DROP
+
+
+#ALLOW the client to access the webpage on the server by ip address of server
+#ZHENGQI LIU
+# allow http/tcp request with source 10.0.2.10 and destination 10.0.2.11, destination port 80
+$IPTABLES -A INPUT -p TCP -s $Client_NET_IP --dport 80 -i $Client_NET_IFACE -d $NAT_WEB_IP_ADDRESS -j ACCEPT
+#ZHENGQI LIU
+#allow http/tcp response with source 10.0.2.11, source port 80 and destination 10.0.2.10
+$IPTABLES -A OUTPUT -p TCP -s $NAT_WEB_IP_ADDRESS --sport 80 -d $Client_NET_IP -j ACCEPT
+
+#stop the client from pinging the server ip address
+#ZHENGQI LIU
+#drop icmp request from interface enp0s3 with destination 10.0.2.11
+$IPTABLES -A INPUT -p icmp -i enp0s3 -d $NAT_WEB_IP_ADDRESS -j DROP
+
+
+#allow server ping 8.8.8.8
+#ZHENGQI LIU
+#forward icmp request with source 10.0.2.10 and destination 8.8.8.8
+$IPTABLES -A FORWARD -p icmp --icmp-type 8 -i enp0s3 -s $Client_NET_IP -d 8.8.8.8 -o enp0s8 -j ACCEPT
+#ZHENGQI LIU
+#forward icmp response with source 8.8.8.8 and destination 10.0.2.10
+$IPTABLES -A FORWARD -p icmp --icmp-type 0 -i enp0s8 -s 8.8.8.8 -d $Client_NET_IP -o enp0s3 -j ACCEPT
+
+#allow client node to access to all internet using masquerade
+$IPTABLES -t nat -A POSTROUTING -o $Internet_IFACE -j MASQUERADE
+
